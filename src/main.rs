@@ -1,8 +1,11 @@
 extern crate sdl2;
 
-use sdl2::event::Event;
+use sdl2::gfx::framerate::FPSManager;
+use sdl2::rect::Point;
+use sdl2::render::WindowCanvas;
+use sdl2::{event::Event, sys::Window};
 use sdl2::keyboard::Keycode;
-use sdl2::pixels;
+use sdl2::pixels::{self, Color};
 
 use sdl2::gfx::primitives::DrawRenderer;
 
@@ -12,6 +15,34 @@ use midir::{Ignore, MidiInput};
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
+
+
+
+
+
+struct Stave {
+    pos: Point,
+    width : u16,
+    height : u16,
+    color: Color
+}
+
+impl Stave {
+    pub fn new() -> Stave {
+        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as u16;
+
+        Stave{
+            width,
+            height: 50,
+            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 20),
+            color: Color::RGB(0,0,0)
+        }
+    }
+
+    pub fn draw(&self, canvas: &WindowCanvas){
+        canvas.thick_line(self.pos.x as i16, self.pos.y as i16, (self.pos.x+self.width as i32) as i16, self.pos.y as i16, 2, self.color);
+    }
+}
 
 fn main() -> Result<(), String> {
 
@@ -94,16 +125,16 @@ fn main() -> Result<(), String> {
 
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
 
-    canvas.set_draw_color(pixels::Color::RGB(0, 0, 0));
-    canvas.clear();
-    canvas.present();
+    
+    let mut fps_manager = FPSManager::new();
+    fps_manager.set_framerate(60).unwrap();
 
-    let mut lastx = 0;
-    let mut lasty = 0;
-
+    let mut stave = Stave::new();
+    
     let mut events = sdl_context.event_pump()?;
-
     'main: loop {
+
+        //events
         for event in events.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'main,
@@ -114,27 +145,30 @@ fn main() -> Result<(), String> {
                 } => {
                     if keycode == Keycode::Escape {
                         break 'main;
-                    } else if keycode == Keycode::Space {
-                        println!("space down");
-                        for i in 0..400 {
-                            canvas.pixel(i as i16, i as i16, 0xFF000FFu32)?;
-                        }
-                        canvas.present();
                     }
                 }
 
-                Event::MouseButtonDown { x, y, .. } => {
-                    let color = pixels::Color::RGB(x as u8, y as u8, 255);
-                    let _ = canvas.line(lastx, lasty, x as i16, y as i16, color);
-                    lastx = x as i16;
-                    lasty = y as i16;
-                    println!("mouse btn down at ({},{})", x, y);
-                    canvas.present();
-                }
+                // Event::MouseButtonDown { x, y, .. } => {
+                //     println!("mouse btn down at ({},{})", x, y);
+                // }
 
                 _ => {}
             }
         }
+
+        //logic
+
+        //render
+        canvas.set_draw_color(Color::RGB(255,255,255));
+        canvas.clear();
+        
+        stave.draw(&canvas);
+        canvas.string(20, 400, &fps_manager.get_frame_count().to_string(), Color::RGB(0, 0, 0)).unwrap();
+
+
+        canvas.present();
+
+        fps_manager.delay();
     }
 
     Ok(())
