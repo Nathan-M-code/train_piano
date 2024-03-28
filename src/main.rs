@@ -9,6 +9,7 @@ use sdl2::pixels::{self, Color};
 
 use sdl2::gfx::primitives::DrawRenderer;
 
+use std::fmt;
 use std::io::{stdin, stdout, Write};
 
 use midir::{Ignore, MidiInput};
@@ -17,30 +18,132 @@ const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
 
+enum Pitch {
+    A,
+    ASharp,
+    AFlat,
+    B,
+    BSharp,
+    BFlat,
+    C,
+    CSharp,
+    CFlat,
+    D,
+    DSharp,
+    DFlat,
+    E,
+    ESharp,
+    EFlat,
+    F,
+    FSharp,
+    FFlat,
+    G,
+    GSharp,
+    GFlat,
+}
 
+#[derive(Debug, PartialEq)]
+enum Clef {
+    Sol,
+    Fa
+}
 
+impl fmt::Display for Clef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
-struct Stave {
-    pos: Point,
-    width : u16,
-    height : u16,
+impl Pitch {
+    pub fn get_factor_height(&self, clef: &Clef) -> i32{
+        let mut r = match self{
+            Self::A => 2,
+            Self::B => 1,
+            Self::C => 0,
+            Self::D => -1,
+            Self::E => -2,
+            Self::F => -3,
+            Self::G => -4,
+            _ => 0
+        };
+
+        if *clef == Clef::Fa {
+            r += 2;
+        }
+
+        r
+    }
+}
+
+struct Note {
+    pitch: Pitch,
+    octave: i32,
     color: Color
 }
 
+impl Note {
+    fn new(pitch: Pitch, octave: i32) -> Note{
+        Note {
+            pitch,
+            octave,
+            color: Color::BLACK
+        }
+    }
+}
+
+struct Stave {
+    pos: Point,
+    width : i32,
+    height : i32,
+    gap : i32,
+    clef: Clef,
+    notes: Vec<Note>,
+    current_note: usize,
+}
+
 impl Stave {
-    pub fn new() -> Stave {
-        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as u16;
+    pub fn new(clef: Clef) -> Stave {
+        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
+        let height = 50;
+        let gap = height/5;
 
         Stave{
             width,
-            height: 50,
+            height,
+            gap,
             pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 20),
-            color: Color::RGB(0,0,0)
+            notes: Vec::new(),
+            current_note: 0,
+            clef
         }
     }
 
+    pub fn add_note(&mut self, note: Note){
+        self.notes.push(note);
+    }
+
     pub fn draw(&self, canvas: &WindowCanvas){
-        canvas.thick_line(self.pos.x as i16, self.pos.y as i16, (self.pos.x+self.width as i32) as i16, self.pos.y as i16, 2, self.color);
+        let gap_x = self.width/15;
+
+        let x_tr = self.pos.x + self.current_note as i32*gap_x;
+        canvas.filled_trigon((x_tr-5) as i16, (self.pos.y-15) as i16, (x_tr+5) as i16, (self.pos.y-15) as i16, x_tr as i16, (self.pos.y-5) as i16, Color::BLACK).unwrap();
+
+        for i in 0..5 {
+            canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*i) as i16, 2, Color::BLACK).unwrap();
+        }
+        
+        let pos_clef = match self.clef{
+            Clef::Sol => self.pos.y+self.height/2,
+            Clef::Fa =>  self.pos.y+self.height/2-20,
+        };
+        canvas.string((self.pos.x-50) as i16, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
+        
+        for (i, n) in self.notes.iter().enumerate() {
+            let y = (self.pos.y as f32 + self.gap as f32*1.5)
+                        +(n.pitch.get_factor_height(&self.clef)*self.gap/2) as f32
+                        +((n.octave-4) * self.gap) as f32*3.5;
+            canvas.filled_circle(self.pos.x as i16 + (gap_x*i as i32) as i16, y as i16, (self.gap/2) as i16, n.color).unwrap();
+        }
     }
 }
 
@@ -129,7 +232,14 @@ fn main() -> Result<(), String> {
     let mut fps_manager = FPSManager::new();
     fps_manager.set_framerate(60).unwrap();
 
-    let mut stave = Stave::new();
+    let mut stave = Stave::new(Clef::Fa);
+    stave.add_note(Note::new(Pitch::A, 4));
+    stave.add_note(Note::new(Pitch::B, 4));
+    stave.add_note(Note::new(Pitch::C, 4));
+    stave.add_note(Note::new(Pitch::D, 4));
+    stave.add_note(Note::new(Pitch::E, 4));
+    stave.add_note(Note::new(Pitch::F, 4));
+    stave.add_note(Note::new(Pitch::G, 4));
     
     let mut events = sdl_context.event_pump()?;
     'main: loop {
