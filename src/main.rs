@@ -1,5 +1,7 @@
 extern crate sdl2;
 
+use rand::distributions::{Distribution, Standard};
+use rand::Rng;
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::rect::Point;
 use sdl2::render::WindowCanvas;
@@ -55,15 +57,15 @@ impl fmt::Display for Clef {
 }
 
 impl Pitch {
-    pub fn get_factor_height(&self, clef: &Clef) -> i32{
+    pub fn get_factor_gap(&self, clef: &Clef) -> i32{
         let mut r = match self{
-            Self::A => 2,
-            Self::B => 1,
-            Self::C => 0,
-            Self::D => -1,
-            Self::E => -2,
-            Self::F => -3,
-            Self::G => -4,
+            Self::A => 5,
+            Self::B => 4,
+            Self::C => 3,
+            Self::D => 2,
+            Self::E => 1,
+            Self::F => 0,
+            Self::G => -1,
             _ => 0
         };
 
@@ -75,26 +77,56 @@ impl Pitch {
     }
 }
 
+impl Distribution<Pitch> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Pitch {
+        match rng.gen_range(0..=7) {
+            0 => Pitch::A,
+            1 => Pitch::B,
+            2 => Pitch::C,
+            3 => Pitch::D,
+            4 => Pitch::E,
+            5 => Pitch::F,
+            _ => Pitch::G
+        }
+    }
+}
+
+
+//from -1 to 7 on my piano
+struct Octave(i32);
+impl Octave {
+    pub fn get_factor_gap(&self, clef: &Clef) -> i32{
+        match clef {
+            Clef::Sol => (4-self.0)*7,
+            Clef::Fa => (3-self.0)*7,
+        }
+    }
+}
+
 struct Note {
     pitch: Pitch,
-    octave: i32,
+    octave: Octave,
     color: Color
 }
 
 impl Note {
-    fn new(pitch: Pitch, octave: i32) -> Note{
+    fn new(pitch: Pitch, octave: Octave) -> Note{
         Note {
             pitch,
             octave,
             color: Color::BLACK
         }
     }
+
+    
 }
 
 struct Stave {
     pos: Point,
     width : i32,
     height : i32,
+    //height between two consecutives notes
+    //= radius of notes
     gap : i32,
     clef: Clef,
     notes: Vec<Note>,
@@ -102,20 +134,42 @@ struct Stave {
 }
 
 impl Stave {
+    #[allow(dead_code)]
     pub fn new(clef: Clef) -> Stave {
         let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
         let height = 50;
-        let gap = height/5;
+        let gap = height/10;
 
         Stave{
             width,
             height,
             gap,
-            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 20),
+            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50),
             notes: Vec::new(),
             current_note: 0,
             clef
         }
+    }
+
+    pub fn new_random(clef: Clef) -> Stave {
+        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
+        let height = 50;
+        let gap = height/10;
+
+        let mut s = Stave{
+            width,
+            height,
+            gap,
+            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50),
+            notes: Vec::new(),
+            current_note: 0,
+            clef
+        };
+
+        for _ in 0..15 {
+            s.add_note(Note::new(rand::random(), Octave(4)));
+        }
+        s
     }
 
     pub fn add_note(&mut self, note: Note){
@@ -129,7 +183,7 @@ impl Stave {
         canvas.filled_trigon((x_tr-5) as i16, (self.pos.y-15) as i16, (x_tr+5) as i16, (self.pos.y-15) as i16, x_tr as i16, (self.pos.y-5) as i16, Color::BLACK).unwrap();
 
         for i in 0..5 {
-            canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*i) as i16, 2, Color::BLACK).unwrap();
+            canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*2*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*2*i) as i16, 2, Color::BLACK).unwrap();
         }
         
         let pos_clef = match self.clef{
@@ -139,72 +193,88 @@ impl Stave {
         canvas.string((self.pos.x-50) as i16, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
         
         for (i, n) in self.notes.iter().enumerate() {
-            let y = (self.pos.y as f32 + self.gap as f32*1.5)
-                        +(n.pitch.get_factor_height(&self.clef)*self.gap/2) as f32
-                        +((n.octave-4) * self.gap) as f32*3.5;
-            canvas.filled_circle(self.pos.x as i16 + (gap_x*i as i32) as i16, y as i16, (self.gap/2) as i16, n.color).unwrap();
+            let nb_factor_gap = n.pitch.get_factor_gap(&self.clef) + n.octave.get_factor_gap(&self.clef);
+            let y = self.pos.y + nb_factor_gap*self.gap;
+            let x = self.pos.x + gap_x*i as i32;
+            canvas.filled_circle(x as i16, y as i16, self.gap as i16, n.color).unwrap();
+            //draw help lines
+            let help_line_width = (self.gap as f32*1.5) as i32;
+            if nb_factor_gap <= -2 {
+                for i_y in (2..=-nb_factor_gap).step_by(2){
+                    let y = self.pos.y + i_y*-self.gap;
+                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, Color::BLACK).unwrap();
+                }
+            }
+            else if nb_factor_gap >= 10 {
+                for i_y in (10..=nb_factor_gap).step_by(2){
+                    let y = self.pos.y + i_y*self.gap;
+                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, Color::BLACK).unwrap();
+                }
+            }
         }
     }
 }
 
 fn main() -> Result<(), String> {
 
-    // let mut input = String::new();
+    let mut input = String::new();
 
-    // let mut midi_in = MidiInput::new("midir reading input").unwrap();
-    // midi_in.ignore(Ignore::None);
+    let mut midi_in = MidiInput::new("midir reading input").unwrap();
+    midi_in.ignore(Ignore::None);
 
-    // // Get an input port (read from console if multiple are available)
-    // let in_ports = midi_in.ports();
-    // let in_port = match in_ports.len() {
-    //     0 => return Err("no input port found".into()),
-    //     1 => {
-    //         println!(
-    //             "Choosing the only available input port: {}",
-    //             midi_in.port_name(&in_ports[0]).unwrap()
-    //         );
-    //         &in_ports[0]
-    //     }
-    //     _ => {
-    //         println!("\nAvailable input ports:");
-    //         for (i, p) in in_ports.iter().enumerate() {
-    //             println!("{}: {}", i, midi_in.port_name(p).unwrap());
-    //         }
-    //         print!("Please select input port: ");
-    //         stdout().flush().unwrap();
-    //         let mut input = String::new();
-    //         stdin().read_line(&mut input).unwrap();
-    //         in_ports
-    //             .get(input.trim().parse::<usize>().unwrap())
-    //             .ok_or("invalid input port selected")?
-    //     }
-    // };
+    // Get an input port (read from console if multiple are available)
+    let in_ports = midi_in.ports();
+    let in_port = match in_ports.len() {
+        0 => return Err("no input port found".into()),
+        1 => {
+            println!(
+                "Choosing the only available input port: {}",
+                midi_in.port_name(&in_ports[0]).unwrap()
+            );
+            &in_ports[0]
+        }
+        _ => {
+            println!("\nAvailable input ports:");
+            for (i, p) in in_ports.iter().enumerate() {
+                println!("{}: {}", i, midi_in.port_name(p).unwrap());
+            }
+            print!("Please select input port: ");
+            stdout().flush().unwrap();
+            let mut input = String::new();
+            stdin().read_line(&mut input).unwrap();
+            in_ports
+                .get(input.trim().parse::<usize>().unwrap())
+                .ok_or("invalid input port selected")?
+        }
+    };
 
-    // println!("\nOpening connection");
-    // let in_port_name = midi_in.port_name(in_port).unwrap();
+    println!("\nOpening connection");
+    let in_port_name = midi_in.port_name(in_port).unwrap();
 
-    // // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
-    // let _conn_in = midi_in.connect(
-    //     in_port,
-    //     "midir-read-input",
-    //     move |stamp, message, _| {
-    //         println!("{}: {:?} (len = {})", stamp, message, message.len());
-    //     },
-    //     (),
-    // ).unwrap();
+    // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
+    let _conn_in = midi_in.connect(
+        in_port,
+        "midir-read-input",
+        move |_, message, _| {
+            if message.len() == 3 {
+                println!("{:?}", message);
+            } 
+        },
+        (),
+    ).unwrap();
 
-    // println!(
-    //     "Connection open, reading input from '{}' (press enter to exit) ...",
-    //     in_port_name
-    // );
+    println!(
+        "Connection open, reading input from '{}' (press enter to exit) ...",
+        in_port_name
+    );
 
-    // input.clear();
-    // stdin().read_line(&mut input).unwrap(); // wait for next enter key press
+    input.clear();
+    stdin().read_line(&mut input).unwrap(); // wait for next enter key press
 
-    // println!("Closing connection");
+    println!("Closing connection");
 
 
-    // return Ok(());
+    return Ok(());
 
 
 
@@ -232,14 +302,7 @@ fn main() -> Result<(), String> {
     let mut fps_manager = FPSManager::new();
     fps_manager.set_framerate(60).unwrap();
 
-    let mut stave = Stave::new(Clef::Fa);
-    stave.add_note(Note::new(Pitch::A, 4));
-    stave.add_note(Note::new(Pitch::B, 4));
-    stave.add_note(Note::new(Pitch::C, 4));
-    stave.add_note(Note::new(Pitch::D, 4));
-    stave.add_note(Note::new(Pitch::E, 4));
-    stave.add_note(Note::new(Pitch::F, 4));
-    stave.add_note(Note::new(Pitch::G, 4));
+    let stave = Stave::new_random(Clef::Sol);
     
     let mut events = sdl_context.event_pump()?;
     'main: loop {
