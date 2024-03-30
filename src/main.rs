@@ -2,6 +2,9 @@ extern crate sdl2;
 
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use std::convert::From;
+use std::convert::Into;
+
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::rect::Point;
 use sdl2::render::WindowCanvas;
@@ -20,6 +23,7 @@ const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
 
+#[derive(Debug)]
 enum Pitch {
     A,
     ASharp,
@@ -93,6 +97,7 @@ impl Distribution<Pitch> for Standard {
 
 
 //from -1 to 7 on my piano
+#[derive(Debug)]
 struct Octave(i32);
 impl Octave {
     pub fn get_factor_gap(&self, clef: &Clef) -> i32{
@@ -103,6 +108,7 @@ impl Octave {
     }
 }
 
+#[derive(Debug)]
 struct Note {
     pitch: Pitch,
     octave: Octave,
@@ -117,8 +123,35 @@ impl Note {
             color: Color::BLACK
         }
     }
+}
 
-    
+impl From<u8> for Note {
+    fn from(value: u8) -> Self {
+        //24 is C0
+        let mut octave = (value as i32-24)/12;
+        if (value as i32-24) < 0 { octave -= 1; }
+        
+        let remainder = (value as i32-24)%12;
+        let pitch = match remainder {
+            -3 => Pitch::A,
+            -2 => Pitch::ASharp,
+            -1 => Pitch::B,
+            0 => Pitch::C,
+            1 => Pitch::CSharp,
+            2 => Pitch::D,
+            3 => Pitch::DSharp,
+            4 => Pitch::E,
+            5 => Pitch::F,
+            6 => Pitch::FSharp,
+            7 => Pitch::G,
+            8 => Pitch::GSharp,
+            9 => Pitch::A,
+            10 => Pitch::ASharp,
+            11 => Pitch::B,
+            _ => panic!("remainder should be [-3 (on my piano) => 11]"),
+        };
+        Note::new(pitch, Octave(octave))
+    }
 }
 
 struct Stave {
@@ -257,7 +290,11 @@ fn main() -> Result<(), String> {
         "midir-read-input",
         move |_, message, _| {
             if message.len() == 3 {
-                println!("{:?}", message);
+                //0 is key released
+                if message[2] != 0 {
+                    // println!("{:?}", message);
+                    println!("note: {:?}", Note::from(message[1]));
+                }
             } 
         },
         (),
