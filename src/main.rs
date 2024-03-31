@@ -4,6 +4,8 @@ use rand::distributions::{Distribution, Standard};
 use rand::Rng;
 use std::convert::From;
 use std::convert::Into;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::rect::Point;
@@ -160,15 +162,15 @@ struct Stave {
     height : i32,
     //height between two consecutives notes
     //= radius of notes
+    //gap*2 = gap between two lines
     gap : i32,
     clef: Clef,
     notes: Vec<Note>,
-    current_note: usize,
 }
 
 impl Stave {
     #[allow(dead_code)]
-    pub fn new(clef: Clef) -> Stave {
+    pub fn new(pos_y: i32, clef: Clef) -> Stave {
         let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
         let height = 50;
         let gap = height/10;
@@ -177,27 +179,14 @@ impl Stave {
             width,
             height,
             gap,
-            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50),
+            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, pos_y),
             notes: Vec::new(),
-            current_note: 0,
             clef
         }
     }
 
-    pub fn new_random(clef: Clef) -> Stave {
-        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
-        let height = 50;
-        let gap = height/10;
-
-        let mut s = Stave{
-            width,
-            height,
-            gap,
-            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50),
-            notes: Vec::new(),
-            current_note: 0,
-            clef
-        };
+    pub fn new_random(pos_y: i32, clef: Clef) -> Stave {
+        let mut s = Stave::new(pos_y, clef);
 
         for _ in 0..15 {
             s.add_note(Note::new(rand::random(), Octave(4)));
@@ -211,9 +200,6 @@ impl Stave {
 
     pub fn draw(&self, canvas: &WindowCanvas){
         let gap_x = self.width/15;
-
-        let x_tr = self.pos.x + self.current_note as i32*gap_x;
-        canvas.filled_trigon((x_tr-5) as i16, (self.pos.y-15) as i16, (x_tr+5) as i16, (self.pos.y-15) as i16, x_tr as i16, (self.pos.y-5) as i16, Color::BLACK).unwrap();
 
         for i in 0..5 {
             canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*2*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*2*i) as i16, 2, Color::BLACK).unwrap();
@@ -248,9 +234,43 @@ impl Stave {
     }
 }
 
-fn main() -> Result<(), String> {
 
-    let mut input = String::new();
+struct Game {
+    staves: Vec<Stave>,
+    current_note: usize,
+}
+
+impl Game {
+    fn new() -> Game{
+        let staves = vec![
+            Stave::new_random(50, Clef::Sol),
+            Stave::new_random(150, Clef::Fa),
+        ];
+
+        Game {
+            staves,
+            current_note: 0
+        }
+    }
+
+    fn note_pressed(&self, note: &Note){
+        println!("note: {:?}", note);
+    }
+
+    fn draw(&self, canvas: &WindowCanvas){
+        for s in &self.staves {
+            s.draw(canvas);
+        }
+
+        // let x_tr = self.pos.x + self.current_note as i32*gap_x;
+        // canvas.filled_trigon((x_tr-5) as i16, (self.pos.y-15) as i16, (x_tr+5) as i16, (self.pos.y-15) as i16, x_tr as i16, (self.pos.y-5) as i16, Color::BLACK).unwrap();
+    }
+}
+
+
+
+
+fn main() -> Result<(), String> {
 
     let mut midi_in = MidiInput::new("midir reading input").unwrap();
     midi_in.ignore(Ignore::None);
@@ -282,41 +302,32 @@ fn main() -> Result<(), String> {
     };
 
     println!("\nOpening connection");
-    let in_port_name = midi_in.port_name(in_port).unwrap();
+    // let in_port_name = midi_in.port_name(in_port).unwrap();
+
+
+
+
+
+    let game = Arc::new(Game::new());
+
+    let callback = |_, message: &[u8], g: &mut Arc<Game>| {
+        if message.len() == 3 {
+            //0 is key released
+            if message[2] != 0 {
+                // println!("{:?}", message);
+                let note = Note::from(message[1]);
+                g.note_pressed(&note);
+            }
+        } 
+    };
 
     // _conn_in needs to be a named parameter, because it needs to be kept alive until the end of the scope
     let _conn_in = midi_in.connect(
         in_port,
         "midir-read-input",
-        move |_, message, _| {
-            if message.len() == 3 {
-                //0 is key released
-                if message[2] != 0 {
-                    // println!("{:?}", message);
-                    println!("note: {:?}", Note::from(message[1]));
-                }
-            } 
-        },
-        (),
+        callback,
+        game.clone(),
     ).unwrap();
-
-    println!(
-        "Connection open, reading input from '{}' (press enter to exit) ...",
-        in_port_name
-    );
-
-    input.clear();
-    stdin().read_line(&mut input).unwrap(); // wait for next enter key press
-
-    println!("Closing connection");
-
-
-    return Ok(());
-
-
-
-
-
 
 
 
@@ -324,7 +335,7 @@ fn main() -> Result<(), String> {
     let video_subsys = sdl_context.video()?;
     let window = video_subsys
         .window(
-            "rust-sdl2_gfx: draw line & FPSManager",
+            "Train piano",
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
         )
@@ -339,7 +350,7 @@ fn main() -> Result<(), String> {
     let mut fps_manager = FPSManager::new();
     fps_manager.set_framerate(60).unwrap();
 
-    let stave = Stave::new_random(Clef::Sol);
+    
     
     let mut events = sdl_context.event_pump()?;
     'main: loop {
@@ -372,7 +383,7 @@ fn main() -> Result<(), String> {
         canvas.set_draw_color(Color::RGB(255,255,255));
         canvas.clear();
         
-        stave.draw(&canvas);
+        game.draw(&canvas);
         canvas.string(20, 400, &fps_manager.get_frame_count().to_string(), Color::RGB(0, 0, 0)).unwrap();
 
 
