@@ -2,6 +2,7 @@ extern crate sdl2;
 
 use rand::distributions::{Distribution, Standard};
 use rand::Rng;
+use std::collections::HashMap;
 use std::convert::From;
 use std::convert::Into;
 use std::rc::Rc;
@@ -28,26 +29,19 @@ const SCREEN_HEIGHT: u32 = 600;
 #[derive(Debug)]
 enum Pitch {
     A,
-    ASharp,
-    AFlat,
     B,
-    BSharp,
-    BFlat,
     C,
-    CSharp,
-    CFlat,
     D,
-    DSharp,
-    DFlat,
     E,
-    ESharp,
-    EFlat,
     F,
-    FSharp,
-    FFlat,
     G,
-    GSharp,
-    GFlat,
+}
+
+#[derive(Debug)]
+enum Accidental{
+    Sharp,
+    Flat,
+    Natural
 }
 
 #[derive(Debug, PartialEq)]
@@ -55,6 +49,21 @@ enum Clef {
     Sol,
     Fa
 }
+
+enum KeySignatureAccidental{
+    Sharp,
+    Flat,
+}
+struct KeySignature(KeySignatureAccidental, u8);
+impl KeySignature{
+    fn new(accidental: KeySignatureAccidental, nb: u8) -> KeySignature {
+        let nb = nb.clamp(0, 7);
+        KeySignature(accidental, nb)
+    }
+}
+
+const ORDER_SIGNATURE_SHARP: [Pitch; 7] = [Pitch::F, Pitch::C, Pitch::G, Pitch::D, Pitch::A, Pitch::E, Pitch::B];
+const ORDER_SIGNATURE_FLAT: [Pitch; 7] = [Pitch::B, Pitch::E, Pitch::A, Pitch::D, Pitch::G, Pitch::C, Pitch::F];
 
 impl fmt::Display for Clef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -113,14 +122,16 @@ impl Octave {
 #[derive(Debug)]
 struct Note {
     pitch: Pitch,
+    accidental: Option<Accidental>,
     octave: Octave,
     color: Color
 }
 
 impl Note {
-    fn new(pitch: Pitch, octave: Octave) -> Note{
+    fn new(pitch: Pitch, accidental: Option<Accidental>, octave: Octave) -> Note{
         Note {
             pitch,
+            accidental,
             octave,
             color: Color::BLACK
         }
@@ -134,25 +145,25 @@ impl From<u8> for Note {
         if (value as i32-24) < 0 { octave -= 1; }
         
         let remainder = (value as i32-24)%12;
-        let pitch = match remainder {
-            -3 => Pitch::A,
-            -2 => Pitch::ASharp,
-            -1 => Pitch::B,
-            0 => Pitch::C,
-            1 => Pitch::CSharp,
-            2 => Pitch::D,
-            3 => Pitch::DSharp,
-            4 => Pitch::E,
-            5 => Pitch::F,
-            6 => Pitch::FSharp,
-            7 => Pitch::G,
-            8 => Pitch::GSharp,
-            9 => Pitch::A,
-            10 => Pitch::ASharp,
-            11 => Pitch::B,
+        let (pitch, accidental) = match remainder {
+            -3 => (Pitch::A, None),
+            -2 => (Pitch::A, Some(Accidental::Sharp)),
+            -1 => (Pitch::B, None),
+            0 => (Pitch::C, None),
+            1 => (Pitch::C, Some(Accidental::Sharp)),
+            2 => (Pitch::D, None),
+            3 => (Pitch::D, Some(Accidental::Sharp)),
+            4 => (Pitch::E, None),
+            5 => (Pitch::F, None),
+            6 => (Pitch::F, Some(Accidental::Sharp)),
+            7 => (Pitch::G, None),
+            8 => (Pitch::G, Some(Accidental::Sharp)),
+            9 => (Pitch::A, None),
+            10 => (Pitch::A, Some(Accidental::Sharp)),
+            11 => (Pitch::B, None),
             _ => panic!("remainder should be [-3 (on my piano) => 11]"),
         };
-        Note::new(pitch, Octave(octave))
+        Note::new(pitch, accidental, Octave(octave))
     }
 }
 
@@ -165,12 +176,13 @@ struct Stave {
     //gap*2 = gap between two lines
     gap : i32,
     clef: Clef,
+    key_signature: Option<KeySignature>,
     notes: Vec<Note>,
 }
 
 impl Stave {
     #[allow(dead_code)]
-    pub fn new(pos_y: i32, clef: Clef) -> Stave {
+    pub fn new(pos_y: i32, clef: Clef, key_signature: Option<KeySignature>) -> Stave {
         let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
         let height = 50;
         let gap = height/10;
@@ -181,15 +193,16 @@ impl Stave {
             gap,
             pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, pos_y),
             notes: Vec::new(),
+            key_signature,
             clef
         }
     }
 
-    pub fn new_random(pos_y: i32, clef: Clef) -> Stave {
-        let mut s = Stave::new(pos_y, clef);
+    pub fn new_random(pos_y: i32, clef: Clef, key_signature: Option<KeySignature>) -> Stave {
+        let mut s = Stave::new(pos_y, clef, key_signature);
 
         for _ in 0..15 {
-            s.add_note(Note::new(rand::random(), Octave(4)));
+            s.add_note(Note::new(rand::random(), None, Octave(4)));
         }
         s
     }
@@ -199,22 +212,45 @@ impl Stave {
     }
 
     pub fn draw(&self, canvas: &WindowCanvas){
-        let gap_x = self.width/15;
-
+        //draw lines
         for i in 0..5 {
             canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*2*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*2*i) as i16, 2, Color::BLACK).unwrap();
         }
         
+        //draw clef
         let pos_clef = match self.clef{
             Clef::Sol => self.pos.y+self.height/2,
             Clef::Fa =>  self.pos.y+self.height/2-20,
         };
         canvas.string((self.pos.x-50) as i16, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
         
+
+        
+
+        //draw key_signature
+        let gap_x = self.width/60;
+        if let Some(key) = &self.key_signature{
+            let s;
+            let order;
+            match key.0 {
+                KeySignatureAccidental::Sharp => {s = '#'; order = ORDER_SIGNATURE_SHARP;},
+                KeySignatureAccidental::Flat => {s = 'b'; order = ORDER_SIGNATURE_FLAT;},
+            }
+            
+            for i in 0..key.1 {
+                let y = self.pos.y + order[i as usize].get_factor_gap(&self.clef)*self.gap + 1 - self.gap;
+                let x = self.pos.x + gap_x*i as i32;
+                canvas.character(x as i16, y as i16, s, Color::BLACK).unwrap();
+            }
+        }
+        
+        let start_x = gap_x*8;
+        let gap_x = self.width/15;
+        //draw notes
         for (i, n) in self.notes.iter().enumerate() {
             let nb_factor_gap = n.pitch.get_factor_gap(&self.clef) + n.octave.get_factor_gap(&self.clef);
             let y = self.pos.y + nb_factor_gap*self.gap;
-            let x = self.pos.x + gap_x*i as i32;
+            let x = self.pos.x + start_x + gap_x*i as i32;
             canvas.filled_circle(x as i16, y as i16, self.gap as i16, n.color).unwrap();
             //draw help lines
             let help_line_width = (self.gap as f32*1.5) as i32;
@@ -243,8 +279,9 @@ struct Game {
 impl Game {
     fn new() -> Game{
         let staves = vec![
-            Stave::new_random(50, Clef::Sol),
-            Stave::new_random(150, Clef::Fa),
+            Stave::new_random(50, Clef::Sol, Some(KeySignature::new(KeySignatureAccidental::Sharp, 3))),
+            Stave::new_random(150, Clef::Fa, Some(KeySignature::new(KeySignatureAccidental::Flat, 5))),
+            Stave::new_random(250, Clef::Fa, None),
         ];
 
         Game {
