@@ -5,8 +5,9 @@ use rand::Rng;
 use std::collections::HashMap;
 use std::convert::From;
 use std::convert::Into;
+use std::ops::DerefMut;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::rect::Point;
@@ -26,7 +27,7 @@ const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum Pitch {
     A,
     B,
@@ -37,7 +38,7 @@ enum Pitch {
     G,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum Accidental{
     Sharp,
     Flat,
@@ -108,7 +109,7 @@ impl Distribution<Pitch> for Standard {
 
 
 //from -1 to 7 on my piano
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct Octave(i32);
 impl Octave {
     pub fn get_factor_gap(&self, clef: &Clef) -> i32{
@@ -119,7 +120,7 @@ impl Octave {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct Note {
     pitch: Pitch,
     accidental: Option<Accidental>,
@@ -169,8 +170,7 @@ impl From<u8> for Note {
 
 struct Stave {
     pos: Point,
-    width : i32,
-    height : i32,
+    size: Point,
     //height between two consecutives notes
     //= radius of notes
     //gap*2 = gap between two lines
@@ -182,26 +182,34 @@ struct Stave {
 
 impl Stave {
     #[allow(dead_code)]
-    pub fn new(pos_y: i32, clef: Clef, key_signature: Option<KeySignature>) -> Stave {
-        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
-        let height = 50;
-        let gap = height/10;
+    pub fn new(
+        pos: Point,
+        size: Point,
+        clef: Clef,
+        key_signature: Option<KeySignature>
+    ) -> Stave {
+        let gap = size.y/10;
 
         Stave{
-            width,
-            height,
+            pos,
+            size,
             gap,
-            pos: Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, pos_y),
             notes: Vec::new(),
             key_signature,
             clef
         }
     }
 
-    pub fn new_random(pos_y: i32, clef: Clef, key_signature: Option<KeySignature>) -> Stave {
-        let mut s = Stave::new(pos_y, clef, key_signature);
+    pub fn new_random(
+        pos: Point,
+        size: Point,
+        clef: Clef,
+        key_signature: Option<KeySignature>,
+        nb_note: usize,
+    ) -> Stave {
+        let mut s = Stave::new(pos, size, clef, key_signature);
 
-        for _ in 0..15 {
+        for _ in 0..nb_note {
             s.add_note(Note::new(rand::random(), None, Octave(4)));
         }
         s
@@ -214,13 +222,13 @@ impl Stave {
     pub fn draw(&self, canvas: &WindowCanvas){
         //draw lines
         for i in 0..5 {
-            canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*2*i)as i32) as i16, (self.pos.x+self.width as i32) as i16, (self.pos.y+self.gap*2*i) as i16, 2, Color::BLACK).unwrap();
+            canvas.thick_line(self.pos.x as i16, (self.pos.y+(self.gap*2*i)as i32) as i16, (self.pos.x+self.size.x as i32) as i16, (self.pos.y+self.gap*2*i) as i16, 2, Color::BLACK).unwrap();
         }
         
         //draw clef
         let pos_clef = match self.clef{
-            Clef::Sol => self.pos.y+self.height/2,
-            Clef::Fa =>  self.pos.y+self.height/2-20,
+            Clef::Sol => self.pos.y+self.size.y/2,
+            Clef::Fa =>  self.pos.y+self.size.y/2-20,
         };
         canvas.string((self.pos.x-50) as i16, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
         
@@ -228,7 +236,7 @@ impl Stave {
         
 
         //draw key_signature
-        let gap_x = self.width/60;
+        let gap_x = self.size.x/60;
         if let Some(key) = &self.key_signature{
             let s;
             let order;
@@ -245,7 +253,7 @@ impl Stave {
         }
         
         let start_x = gap_x*8;
-        let gap_x = self.width/15;
+        let gap_x = self.size.x/self.notes.len() as i32;
         //draw notes
         for (i, n) in self.notes.iter().enumerate() {
             let nb_factor_gap = n.pitch.get_factor_gap(&self.clef) + n.octave.get_factor_gap(&self.clef);
@@ -278,29 +286,51 @@ struct Game {
 
 impl Game {
     fn new() -> Game{
-        let staves = vec![
-            Stave::new_random(50, Clef::Sol, Some(KeySignature::new(KeySignatureAccidental::Sharp, 3))),
-            Stave::new_random(150, Clef::Fa, Some(KeySignature::new(KeySignatureAccidental::Flat, 5))),
-            Stave::new_random(250, Clef::Fa, None),
-        ];
+        let width = (SCREEN_WIDTH as f32-(SCREEN_WIDTH as f32*0.2)) as i32;
+        let height = 50;
+        let size = Point::new(width, height);
+        let pos = Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50);
+
+        let nb_note = 13;
+        let gap_x = width/15;
+
+        let mut staves = Vec::new();
+        for i in 0..=3 {
+            let pos_stave = Point::new(pos.x, pos.y+i*(height+40));
+            staves.push(Stave::new_random(pos_stave, size, Clef::Sol, Some(KeySignature::new(KeySignatureAccidental::Sharp, 3)), nb_note));
+
+        }
 
         Game {
             staves,
-            current_note: 0
+            current_note: 0,
         }
     }
 
-    fn note_pressed(&self, note: &Note){
-        println!("note: {:?}", note);
+    fn note_pressed(&mut self, note: &Note){
+        println!("note pressed: {:?}", note);
+        let n = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
+        if n == note {
+            n.color = Color::GREEN;
+        }
+    }
+    
+    fn note_released(&mut self, note: &Note){
+        println!("note released: {:?}", note);
+        let n = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
+        n.color = Color::BLACK;
     }
 
     fn draw(&self, canvas: &WindowCanvas){
         for s in &self.staves {
             s.draw(canvas);
         }
-
-        // let x_tr = self.pos.x + self.current_note as i32*gap_x;
-        // canvas.filled_trigon((x_tr-5) as i16, (self.pos.y-15) as i16, (x_tr+5) as i16, (self.pos.y-15) as i16, x_tr as i16, (self.pos.y-5) as i16, Color::BLACK).unwrap();
+        
+        let first_stave = self.staves.get(0).unwrap();
+        let small_gap_x = first_stave.size.x/60;
+        let gap_x = first_stave.size.x/first_stave.notes.len() as i32;
+        let x_tr = first_stave.pos.x + small_gap_x*8 + self.current_note as i32*gap_x;
+        canvas.filled_trigon((x_tr-5) as i16, (first_stave.pos.y-15) as i16, (x_tr+5) as i16, (first_stave.pos.y-15) as i16, x_tr as i16, (first_stave.pos.y-5) as i16, Color::BLACK).unwrap();
     }
 }
 
@@ -345,15 +375,17 @@ fn main() -> Result<(), String> {
 
 
 
-    let game = Arc::new(Game::new());
+    let game = Arc::new(Mutex::new(Game::new()));
 
-    let callback = |_, message: &[u8], g: &mut Arc<Game>| {
+    let callback = |_, message: &[u8], g: &mut Arc<Mutex<Game>>| {
         if message.len() == 3 {
+            // println!("{:?}", message);
+            let note = Note::from(message[1]);
             //0 is key released
-            if message[2] != 0 {
-                // println!("{:?}", message);
-                let note = Note::from(message[1]);
-                g.note_pressed(&note);
+            if message[2] == 0 {
+                g.lock().unwrap().note_released(&note);
+            }else{
+                g.lock().unwrap().note_pressed(&note);
             }
         } 
     };
@@ -420,7 +452,7 @@ fn main() -> Result<(), String> {
         canvas.set_draw_color(Color::RGB(255,255,255));
         canvas.clear();
         
-        game.draw(&canvas);
+        game.lock().unwrap().draw(&canvas);
         canvas.string(20, 400, &fps_manager.get_frame_count().to_string(), Color::RGB(0, 0, 0)).unwrap();
 
 
