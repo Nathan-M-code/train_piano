@@ -27,7 +27,7 @@ const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Pitch {
     A,
     B,
@@ -38,14 +38,24 @@ enum Pitch {
     G,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Accidental{
     Sharp,
     Flat,
     Natural
 }
 
-#[derive(Debug, PartialEq)]
+impl Distribution<Accidental> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Accidental {
+        match rng.gen_range(0..=2) {
+            0 => Accidental::Flat,
+            1 => Accidental::Natural,
+            _ => Accidental::Sharp,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Clef {
     Sol,
     Fa
@@ -61,6 +71,24 @@ impl KeySignature{
         let nb = nb.clamp(0, 7);
         KeySignature(accidental, nb)
     }
+
+    fn is_pitch_inside(&self, p: Pitch) -> bool {
+        match self.0 {
+            KeySignatureAccidental::Sharp => {
+                for i in 0..self.1{
+                    if ORDER_SIGNATURE_SHARP[i as usize] == p { return true; }
+                }
+                return false;
+            },
+            KeySignatureAccidental::Flat => {
+                for i in 0..self.1{
+                    if ORDER_SIGNATURE_FLAT[i as usize] == p { return true; }
+                }
+                return false;
+            },
+        }
+        false
+    }
 }
 
 const ORDER_SIGNATURE_SHARP: [Pitch; 7] = [Pitch::F, Pitch::C, Pitch::G, Pitch::D, Pitch::A, Pitch::E, Pitch::B];
@@ -75,21 +103,20 @@ impl fmt::Display for Clef {
 impl Pitch {
     pub fn get_factor_gap(&self, clef: &Clef) -> i32{
         let mut r = match self{
-            Self::A => 5,
-            Self::B => 4,
-            Self::C => 3,
-            Self::D => 2,
-            Self::E => 1,
-            Self::F => 0,
-            Self::G => -1,
-            _ => 0
+            Self::A => -5,
+            Self::B => -6,
+            Self::C => 0,
+            Self::D => -1,
+            Self::E => -2,
+            Self::F => -3,
+            Self::G => -4
         };
 
         if *clef == Clef::Fa {
             r += 2;
         }
 
-        r
+        r+3
     }
 }
 
@@ -109,7 +136,7 @@ impl Distribution<Pitch> for Standard {
 
 
 //from -1 to 7 on my piano
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct Octave(i32);
 impl Octave {
     pub fn get_factor_gap(&self, clef: &Clef) -> i32{
@@ -120,7 +147,7 @@ impl Octave {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 struct Note {
     pitch: Pitch,
     accidental: Option<Accidental>,
@@ -138,6 +165,14 @@ impl Note {
         }
     }
 }
+
+//Note is same independently of its color
+impl PartialEq for Note {
+    fn eq(&self, other: &Self) -> bool {
+        self.pitch == other.pitch && self.accidental == other.accidental && self.octave == other.octave
+    }
+}
+impl Eq for Note {}
 
 impl From<u8> for Note {
     fn from(value: u8) -> Self {
@@ -210,7 +245,7 @@ impl Stave {
         let mut s = Stave::new(pos, size, clef, key_signature);
 
         for _ in 0..nb_note {
-            s.add_note(Note::new(rand::random(), None, Octave(4)));
+            s.add_note(Note::new(rand::random(), rand::random(), Octave(4)));
         }
         s
     }
@@ -236,7 +271,7 @@ impl Stave {
         
 
         //draw key_signature
-        let gap_x = self.size.x/60;
+        let small_gap_x = self.size.x/60;
         if let Some(key) = &self.key_signature{
             let s;
             let order;
@@ -247,31 +282,56 @@ impl Stave {
             
             for i in 0..key.1 {
                 let y = self.pos.y + order[i as usize].get_factor_gap(&self.clef)*self.gap + 1 - self.gap;
-                let x = self.pos.x + gap_x*i as i32;
+                let x = self.pos.x + small_gap_x*i as i32;
                 canvas.character(x as i16, y as i16, s, Color::BLACK).unwrap();
             }
         }
         
-        let start_x = gap_x*8;
-        let gap_x = self.size.x/self.notes.len() as i32;
+        let start_x = small_gap_x*8;
+        let gap_x = self.size.x/15;
         //draw notes
         for (i, n) in self.notes.iter().enumerate() {
             let nb_factor_gap = n.pitch.get_factor_gap(&self.clef) + n.octave.get_factor_gap(&self.clef);
             let y = self.pos.y + nb_factor_gap*self.gap;
             let x = self.pos.x + start_x + gap_x*i as i32;
             canvas.filled_circle(x as i16, y as i16, self.gap as i16, n.color).unwrap();
+
+            //draw accidental
+            if let Some(ks) = &self.key_signature {
+                // if let Some(acci) = &n.accidental {
+                //     match acci {
+                //         Accidental::Sharp => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, '#', n.color).unwrap(),
+                //         Accidental::Flat => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'b', n.color).unwrap(),
+                //         Accidental::Natural => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'n', n.color).unwrap(),
+                //     }
+                // }
+                // if !ks.is_pitch_inside(n.pitch){
+                // }
+            }
+            //no key-sign, draw all accidental
+            else{
+                if let Some(acci) = &n.accidental {
+                    match acci {
+                        Accidental::Sharp => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, '#', n.color).unwrap(),
+                        Accidental::Flat => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'b', n.color).unwrap(),
+                        Accidental::Natural => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'n', n.color).unwrap(),
+                    }
+                }
+            }
+            
+            
             //draw help lines
             let help_line_width = (self.gap as f32*1.5) as i32;
             if nb_factor_gap <= -2 {
                 for i_y in (2..=-nb_factor_gap).step_by(2){
                     let y = self.pos.y + i_y*-self.gap;
-                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, Color::BLACK).unwrap();
+                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, n.color).unwrap();
                 }
             }
             else if nb_factor_gap >= 10 {
                 for i_y in (10..=nb_factor_gap).step_by(2){
                     let y = self.pos.y + i_y*self.gap;
-                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, Color::BLACK).unwrap();
+                    canvas.thick_line((x-help_line_width) as i16, y as i16, (x+help_line_width) as i16 , y as i16, 2, n.color).unwrap();
                 }
             }
         }
@@ -282,6 +342,7 @@ impl Stave {
 struct Game {
     staves: Vec<Stave>,
     current_note: usize,
+    pressed_note: Option<Note>,
 }
 
 impl Game {
@@ -291,46 +352,65 @@ impl Game {
         let size = Point::new(width, height);
         let pos = Point::new(((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32, 50);
 
-        let nb_note = 13;
-        let gap_x = width/15;
+        let mut rng = rand::thread_rng();
 
         let mut staves = Vec::new();
         for i in 0..=3 {
             let pos_stave = Point::new(pos.x, pos.y+i*(height+40));
-            staves.push(Stave::new_random(pos_stave, size, Clef::Sol, Some(KeySignature::new(KeySignatureAccidental::Sharp, 3)), nb_note));
-
+            staves.push(Stave::new_random(pos_stave, size, Clef::Sol, None, rng.gen_range(1..14)));
         }
+
+        staves.get_mut(0).unwrap().notes.get_mut(0).unwrap().color = Color::GRAY;
 
         Game {
             staves,
             current_note: 0,
+            pressed_note: None,
         }
     }
 
-    fn note_pressed(&mut self, note: &Note){
-        println!("note pressed: {:?}", note);
-        let n = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
-        if n == note {
-            n.color = Color::GREEN;
+    fn note_pressed(&mut self, note_pressed: &Note){
+        println!("note_pressed: {:?}", note_pressed);
+        self.pressed_note = Some(*note_pressed);
+        
+        let searched_note = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
+        println!("searched_note: {:?}", searched_note);
+        
+        if searched_note == note_pressed {
+            searched_note.color = Color::GREEN;
+
+            self.current_note += 1;
+            if self.current_note == self.staves.get_mut(0).unwrap().notes.len() {
+                self.staves.remove(0);
+                self.current_note = 0;
+            }
+            //set the searched note GREY
+            else{
+                self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap().color = Color::GRAY;
+            }
+        }
+        
+        else{
+            searched_note.color = Color::RED;
         }
     }
     
-    fn note_released(&mut self, note: &Note){
-        println!("note released: {:?}", note);
-        let n = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
-        n.color = Color::BLACK;
+    fn note_released(&mut self, note_released: &Note){
+        // println!("note_released: {:?}", note_released);
+        // println!("self.pressed_note: {:?}", self.pressed_note);
+
+        if self.pressed_note.as_ref() == Some(note_released){
+            self.pressed_note = None;
+            
+            let searched_note = self.staves.get_mut(0).unwrap().notes.get_mut(self.current_note).unwrap();
+            searched_note.color = Color::GRAY;
+        }
     }
 
     fn draw(&self, canvas: &WindowCanvas){
         for s in &self.staves {
             s.draw(canvas);
         }
-        
-        let first_stave = self.staves.get(0).unwrap();
-        let small_gap_x = first_stave.size.x/60;
-        let gap_x = first_stave.size.x/first_stave.notes.len() as i32;
-        let x_tr = first_stave.pos.x + small_gap_x*8 + self.current_note as i32*gap_x;
-        canvas.filled_trigon((x_tr-5) as i16, (first_stave.pos.y-15) as i16, (x_tr+5) as i16, (first_stave.pos.y-15) as i16, x_tr as i16, (first_stave.pos.y-5) as i16, Color::BLACK).unwrap();
     }
 }
 
