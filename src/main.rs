@@ -97,6 +97,8 @@ enum KeySignatureAccidental{
     Sharp,
     Flat,
 }
+
+#[derive(Debug, Clone, Copy)]
 struct KeySignature(KeySignatureAccidental, u8);
 impl KeySignature{
     fn new(accidental: KeySignatureAccidental, nb: u8) -> KeySignature {
@@ -125,6 +127,13 @@ impl KeySignature{
         if self.0 == KeySignatureAccidental::Sharp && a == Accidental::Sharp { return true; }
         if self.0 == KeySignatureAccidental::Flat && a == Accidental::Flat { return true; }
         false
+    }
+
+    fn get_accidental(&self) -> Accidental {
+        match self.0 {
+            KeySignatureAccidental::Sharp => Accidental::Sharp,
+            KeySignatureAccidental::Flat => Accidental::Flat,
+        }
     }
 }
 
@@ -199,7 +208,8 @@ struct Note {
     pitch: Pitch,
     accidental: Option<Accidental>,
     octave: Octave,
-    color: Color
+    color: Color,
+    draw_acci: bool,
 }
 
 impl Note {
@@ -208,7 +218,8 @@ impl Note {
             pitch,
             accidental,
             octave,
-            color: Color::BLACK
+            color: Color::BLACK,
+            draw_acci: true,
         }
     }
 }
@@ -228,7 +239,42 @@ struct Measure{
 }
 
 impl Measure{
-    fn new(notes: Vec<Note>) -> Measure{
+    fn new(mut notes: Vec<Note>, key_sign: KeySignature) -> Measure{
+        //we need to treat notes to have coerent accidentals
+        let mut previous_accidentals : HashMap<Pitch, Accidental> = HashMap::new();
+
+        for n in notes.iter_mut()
+        {
+            if let Some(acci) = previous_accidentals.get(&n.pitch) {
+                if n.accidental.is_some(){
+                    if n.accidental.unwrap() == *acci {
+                        n.draw_acci = false;
+                    }
+                    else{
+                        previous_accidentals.insert(n.pitch, n.accidental.unwrap());
+                    }
+                }
+                //we convert to what was previous
+                else{
+                    n.accidental = Some(*acci);
+                    //but we dont draw accidental
+                    n.draw_acci = false;
+                }
+            }
+
+            else{
+                //first time we encounter this accidental
+                if n.accidental.is_some() {
+                    previous_accidentals.insert(n.pitch, n.accidental.unwrap());
+                    if n.accidental == Some(Accidental::Natural) { n.draw_acci = false; }
+                }
+                else if key_sign.is_pitch_inside(n.pitch) {
+                    n.accidental = Some(key_sign.get_accidental());
+                    n.draw_acci = false;
+                }
+            }
+        }
+
         Measure{
             notes
         }
@@ -243,7 +289,7 @@ struct Stave {
     //gap*2 = gap between two lines
     gap : i32,
     clef: Clef,
-    key_signature: Option<KeySignature>,
+    key_signature: KeySignature,
     measures: Vec<Measure>,
 }
 
@@ -253,7 +299,7 @@ impl Stave {
         x_pos: i32,
         size: Point,
         clef: Clef,
-        key_signature: Option<KeySignature>
+        key_signature: KeySignature
     ) -> Stave {
         let gap = size.y/10;
 
@@ -271,7 +317,7 @@ impl Stave {
         x_pos: i32,
         size: Point,
         clef: Clef,
-        key_signature: Option<KeySignature>,
+        key_signature: KeySignature,
     ) -> Stave {
         let mut s = Stave::new(x_pos, size, clef, key_signature);
         s.add_measure(Measure::new(vec![
@@ -279,19 +325,19 @@ impl Stave {
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
-        ]));
+        ], key_signature));
         s.add_measure(Measure::new(vec![
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
-        ]));
+        ], key_signature));
         s.add_measure(Measure::new(vec![
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
             Note::new(rand::random(), rand::random(), Octave(3)),
-        ]));
+        ], key_signature));
         s
     }
 
@@ -315,28 +361,24 @@ impl Stave {
 
         //draw key_signature
         let small_gap_x = self.size.x/60;
-        if let Some(key) = &self.key_signature{
-            let s;
-            let order;
-            match key.0 {
-                KeySignatureAccidental::Sharp => {s = '#'; order = ORDER_SIGNATURE_SHARP;},
-                KeySignatureAccidental::Flat => {s = 'b'; order = ORDER_SIGNATURE_FLAT;},
-            }
-            
-            for i in 0..key.1 {
-                let y = pos.y + order[i as usize].get_factor_gap(&self.clef)*self.gap + 1 - self.gap;
-                let x = pos.x + small_gap_x*i as i32;
-                canvas.character(x as i16, y as i16, s, Color::BLACK).unwrap();
-            }
+        let s;
+        let order;
+        match self.key_signature.0 {
+            KeySignatureAccidental::Sharp => {s = '#'; order = ORDER_SIGNATURE_SHARP;},
+            KeySignatureAccidental::Flat => {s = 'b'; order = ORDER_SIGNATURE_FLAT;},
+        }
+        
+        for i in 0..self.key_signature.1 {
+            let y = pos.y + order[i as usize].get_factor_gap(&self.clef)*self.gap + 1 - self.gap;
+            let x = pos.x + small_gap_x*i as i32;
+            canvas.character(x as i16, y as i16, s, Color::BLACK).unwrap();
         }
         
         let mut current_x = pos.x + small_gap_x*8;
         let gap_x = self.size.x/15;
         //draw measures
         for m in self.measures.iter(){
-            let mut previous_accidentals : HashMap<Pitch, Accidental> = HashMap::new();
-
-
+            
             //draw notes
             for n in m.notes.iter() {
                 let nb_factor_gap = n.pitch.get_factor_gap(&self.clef) + n.octave.get_factor_gap(&self.clef);
@@ -345,29 +387,11 @@ impl Stave {
                 canvas.filled_circle(x as i16, y as i16, self.gap as i16, n.color).unwrap();
     
                 //draw accidental
-                let mut draw_acci = true;
-
-                if let Some(ks) = &self.key_signature {
-                    
-                }
-                //no key-sign, draw all # and b
-                else{
-                    if let Some(acci) = previous_accidentals.get(&n.pitch) {
-                        if n.accidental.is_some(){
-                            if *acci == n.accidental.unwrap() {
-                                draw_acci = false;
-                            }else{
-                                todo!("blablabla");
-                            }
-                        }
-                    }
-                }
-
-                if draw_acci {
-                    match n.accidental {
-                        Some(Accidental::Sharp) => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, '#', n.color).unwrap(),
-                        Some(Accidental::Flat) => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'b', n.color).unwrap(),
-                        None | Some(Accidental::Natural) => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'n', n.color).unwrap(),
+                if n.draw_acci && n.accidental.is_some(){
+                    match n.accidental.unwrap() {
+                        Accidental::Sharp => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, '#', n.color).unwrap(),
+                        Accidental::Flat => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'b', n.color).unwrap(),
+                        Accidental::Natural => canvas.character((x-small_gap_x-2) as i16, (y-4) as i16, 'n', n.color).unwrap(),
                     }
                 }
                 
@@ -417,7 +441,8 @@ impl Game {
 
         let mut staves = Vec::new();
         for i in 0..4 {
-            staves.push(Stave::new_random(x_pos_stave, size_stave, Clef::Sol, Some(KeySignature(KeySignatureAccidental::Sharp, 3))));
+            // staves.push(Stave::new_random(x_pos_stave, size_stave, Clef::Sol, Some(KeySignature(KeySignatureAccidental::Sharp, 3))));
+            staves.push(Stave::new_random(x_pos_stave, size_stave, Clef::Sol, KeySignature(KeySignatureAccidental::Sharp, 0)));
         }
 
         let current_measure_note = (0,0);
@@ -455,7 +480,7 @@ impl Game {
                     
                     // TODO: create new stave
                     // measure
-                    self.staves.push(Stave::new_random(self.x_pos_stave, self.size_stave, Clef::Sol, Some(KeySignature(KeySignatureAccidental::Sharp, 3))));
+                    self.staves.push(Stave::new_random(self.x_pos_stave, self.size_stave, Clef::Sol, KeySignature(KeySignatureAccidental::Sharp, 0)));
                 }
             }
             //set the searched note GRAY
