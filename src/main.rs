@@ -1,20 +1,18 @@
 extern crate sdl2;
 
 use rand::distributions::{Distribution, Standard};
+use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::collections::HashMap;
-use std::convert::From;
 use std::convert::Into;
-use std::ops::DerefMut;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::rect::Point;
 use sdl2::render::WindowCanvas;
-use sdl2::{event::Event, sys::Window};
+use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::{self, Color};
+use sdl2::pixels::Color;
 
 use sdl2::gfx::primitives::DrawRenderer;
 
@@ -92,10 +90,28 @@ enum Clef {
     Fa
 }
 
+impl Distribution<Clef> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Clef {
+        match rng.gen_bool(0.5) {
+            true => Clef::Sol,
+            false => Clef::Fa,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum KeySignatureAccidental{
     Sharp,
     Flat,
+}
+
+impl Distribution<KeySignatureAccidental> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> KeySignatureAccidental {
+        match rng.gen_bool(0.5) {
+            true => KeySignatureAccidental::Sharp,
+            false => KeySignatureAccidental::Flat,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -134,6 +150,12 @@ impl KeySignature{
             KeySignatureAccidental::Sharp => Accidental::Sharp,
             KeySignatureAccidental::Flat => Accidental::Flat,
         }
+    }
+}
+
+impl Distribution<KeySignature> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> KeySignature {
+        KeySignature::new(rand::random(), rng.gen_range(0..6))
     }
 }
 
@@ -197,7 +219,7 @@ impl Octave {
     pub fn get_factor_gap(&self, clef: &Clef) -> i32{
         match clef {
             Clef::Sol => (4-self.0)*7,
-            Clef::Fa => (3-self.0)*7,
+            Clef::Fa => (2-self.0)*7,
         }
     }
 }
@@ -220,6 +242,18 @@ impl Note {
             octave,
             color: Color::BLACK,
             draw_acci: true,
+        }
+    }
+    fn new_random(rng: &mut ThreadRng, c: Clef) -> Note{
+        match c {
+            Clef::Sol => {
+                //A3 -> G5
+                Note::new(rng.sample(Standard),rng.sample(Standard),Octave(rng.gen_range(3..=4)))
+            },
+            Clef::Fa => {
+                //A1 -> G3
+                Note::new(rng.sample(Standard),rng.sample(Standard),Octave(rng.gen_range(1..=2)))
+            }
         }
     }
 }
@@ -265,9 +299,21 @@ impl Measure{
             else{
                 //first time we encounter this accidental
                 if n.accidental.is_some() {
-                    previous_accidentals.insert(n.pitch, n.accidental.unwrap());
-                    if n.accidental == Some(Accidental::Natural) { n.draw_acci = false; }
+                    if key_sign.is_pitch_inside(n.pitch){
+                        if key_sign.accidental_match(n.accidental.unwrap()){
+                            n.draw_acci = false;
+                        }
+                        else{
+                            previous_accidentals.insert(n.pitch, n.accidental.unwrap());
+                        }
+                    }
+                    
+                    else{
+                        previous_accidentals.insert(n.pitch, n.accidental.unwrap());
+                        if n.accidental == Some(Accidental::Natural) { n.draw_acci = false; }
+                    }
                 }
+
                 else if key_sign.is_pitch_inside(n.pitch) {
                     n.accidental = Some(key_sign.get_accidental());
                     n.draw_acci = false;
@@ -320,23 +366,24 @@ impl Stave {
         key_signature: KeySignature,
     ) -> Stave {
         let mut s = Stave::new(x_pos, size, clef, key_signature);
+        let mut rng = rand::thread_rng();
         s.add_measure(Measure::new(vec![
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
         ], key_signature));
         s.add_measure(Measure::new(vec![
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
         ], key_signature));
         s.add_measure(Measure::new(vec![
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
-            Note::new(rand::random(), rand::random(), Octave(3)),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
+            Note::new_random(&mut rng, clef),
         ], key_signature));
         s
     }
@@ -357,7 +404,7 @@ impl Stave {
             Clef::Sol => pos.y+self.size.y/2,
             Clef::Fa =>  pos.y+self.size.y/2-20,
         };
-        canvas.string(pos.x as i16, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
+        canvas.string(pos.x as i16 - 23, pos_clef as i16, &self.clef.to_string(), Color::BLACK).unwrap();
 
         //draw key_signature
         let small_gap_x = self.size.x/60;
@@ -437,12 +484,9 @@ impl Game {
         let size_stave = Point::new(width, height);
         let x_pos_stave = ((SCREEN_WIDTH as f32 - width as f32)/2. as f32) as i32;
 
-        let mut rng = rand::thread_rng();
-
         let mut staves = Vec::new();
-        for i in 0..4 {
-            // staves.push(Stave::new_random(x_pos_stave, size_stave, Clef::Sol, Some(KeySignature(KeySignatureAccidental::Sharp, 3))));
-            staves.push(Stave::new_random(x_pos_stave, size_stave, Clef::Sol, KeySignature(KeySignatureAccidental::Sharp, 0)));
+        for _ in 0..4 {
+            staves.push(Stave::new_random(x_pos_stave, size_stave, rand::random(), rand::random()));
         }
 
         let current_measure_note = (0,0);
@@ -506,7 +550,7 @@ impl Game {
 
     fn draw(&self, canvas: &WindowCanvas){
         for (i,s) in self.staves.iter().enumerate() {
-            s.draw(40+(i*100) as i32, canvas);
+            s.draw(40+(i*150) as i32, canvas);
         }
     }
 }
@@ -630,8 +674,7 @@ fn main() -> Result<(), String> {
         canvas.clear();
         
         game.lock().unwrap().draw(&canvas);
-        canvas.string(20, 400, &fps_manager.get_frame_count().to_string(), Color::RGB(0, 0, 0)).unwrap();
-
+        // canvas.string(20, 400, &fps_manager.get_frame_count().to_string(), Color::RGB(0, 0, 0)).unwrap();
 
         canvas.present();
 
