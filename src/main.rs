@@ -20,6 +20,13 @@ mod music;
 use crate::game::Game;
 
 fn main() -> Result<(), String> {
+
+
+    let game = Arc::new(Mutex::new(Game::new(SCREEN_WIDTH)));
+
+
+
+
     let mut midi_in = MidiInput::new("midir reading input").unwrap();
     midi_in.ignore(Ignore::None);
 
@@ -49,11 +56,6 @@ fn main() -> Result<(), String> {
         }
     };
 
-    println!("\nOpening connection");
-    // let in_port_name = midi_in.port_name(in_port).unwrap();
-
-    let game = Arc::new(Mutex::new(Game::new(SCREEN_WIDTH)));
-
     let callback = |_, message: &[u8], g: &mut Arc<Mutex<Game>>| {
         if message.len() == 3 {
             g.lock().unwrap().parse_midi_message(message);
@@ -64,6 +66,12 @@ fn main() -> Result<(), String> {
     let _conn_in = midi_in
         .connect(in_port, "midir-read-input", callback, game.clone())
         .unwrap();
+
+
+
+
+
+        
 
     let sdl_context = sdl2::init()?;
     let video_subsys = sdl_context.video()?;

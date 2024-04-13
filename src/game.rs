@@ -266,6 +266,20 @@ impl Stave {
         let gap_x = self.size.x / 15;
         //draw measures
         for m in self.measures.iter() {
+            //draw measures separating lines
+            canvas
+                .thick_line(
+                    current_x as i16,
+                    pos.y as i16,
+                    current_x as i16,
+                    (pos.y + self.gap * 8) as i16,
+                    2,
+                    Color::BLACK,
+                )
+                .unwrap();
+            current_x += gap_x;
+
+
             //draw notes
             for n in m.notes.iter() {
                 let nb_factor_gap = get_factor_gap_pitch(&n.pitch, &self.clef)
@@ -325,19 +339,6 @@ impl Stave {
 
                 current_x += gap_x;
             }
-
-            //draw measures separating lines
-            canvas
-                .thick_line(
-                    current_x as i16,
-                    pos.y as i16,
-                    current_x as i16,
-                    (pos.y + self.gap * 8) as i16,
-                    2,
-                    Color::BLACK,
-                )
-                .unwrap();
-            current_x += gap_x;
         }
     }
 }
@@ -348,6 +349,7 @@ pub struct Game {
     staves: Vec<Stave>,
     current_measure_note: (usize, usize),
     pressed_semitone: Option<Semitone>,
+    score: (u32, u32)
 }
 
 impl Game {
@@ -385,6 +387,7 @@ impl Game {
             staves,
             current_measure_note,
             pressed_semitone: None,
+            score: (0,0),
         }
     }
 
@@ -418,6 +421,8 @@ impl Game {
         println!("semitone_searched_note: {:?}", semitone_searched_note);
 
         if &semitone_searched_note == pressed_semitone {
+            self.score.0 += 1;
+
             searched_note.color = Color::GREEN;
 
             self.current_measure_note.1 += 1;
@@ -463,6 +468,7 @@ impl Game {
         } else {
             searched_note.color = Color::RED;
         }
+        self.score.1 += 1;
     }
 
     fn released_semitone(&mut self, released_semitone: &Semitone) {
@@ -490,5 +496,7 @@ impl Game {
         for (i, s) in self.staves.iter().enumerate() {
             s.draw(40 + (i * 150) as i32, canvas);
         }
+
+        canvas.string(5,5, &((self.score.0).to_string()+"/"+&(self.score.1).to_string()), Color::BLACK).unwrap();
     }
 }
