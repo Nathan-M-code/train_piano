@@ -263,7 +263,7 @@ impl Stave {
         }
 
         let mut current_x = pos.x + small_gap_x * 8;
-        let gap_x = self.size.x / 15;
+        let gap_x = self.size.x / 18;
         //draw measures
         for m in self.measures.iter() {
             //draw measures separating lines

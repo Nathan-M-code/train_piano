@@ -175,7 +175,11 @@ impl Distribution<KeySignatureAccidental> for Standard {
 
 impl Distribution<KeySignature> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> KeySignature {
-        KeySignature::new(rng.sample(Standard), rng.gen_range(0..6))
+        let nb = match rng.gen_bool(0.2) {
+            true => rng.gen_range(1..6),
+            false => 0
+        };
+        KeySignature::new(rng.sample(Standard), nb)
     }
 }
 

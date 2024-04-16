@@ -1,34 +1,33 @@
 extern crate sdl2;
-
-
-
-use std::sync::{Arc, Mutex};
-
-use sdl2::event::Event;
+use sdl2::{event::Event, keyboard::Scancode};
 use sdl2::gfx::framerate::FPSManager;
 use sdl2::gfx::primitives::DrawRenderer;
-
 use sdl2::pixels::Color;
-
-
 
 use midir::{Ignore, MidiInput};
 
-const SCREEN_WIDTH: u32 = 800;
-const SCREEN_HEIGHT: u32 = 600;
+use std::sync::{Arc, Mutex};
 
 mod game;
 mod music;
 use crate::game::Game;
 
+
+
+const SCREEN_WIDTH: u32 = 800;
+const SCREEN_HEIGHT: u32 = 600;
+
+
 fn main() -> Result<(), String> {
 
     let mut _conn_in;
+    let mut midi_in = Some(MidiInput::new("midir reading input").unwrap());
+    midi_in.as_mut().unwrap().ignore(Ignore::None);
 
-    let mut asking_midi_port = true;
 
-    let btn_pos_y = 100;
-    let btn_size_y = 50;
+
+    let btn_pos_y = 70;
+    let btn_size_y = 30;
 
     let game = Arc::new(Mutex::new(Game::new(SCREEN_WIDTH)));
 
@@ -70,20 +69,40 @@ fn main() -> Result<(), String> {
                 //     }
                 // }
 
-                Event::MouseButtonDown {  y, .. } => {
-                    if asking_midi_port {
-                        let mut midi_in = MidiInput::new("midir reading input").unwrap();
-                        midi_in.ignore(Ignore::None);
-
-                        // println!("mouse btn down at ({},{})", x, y);
-
-                        let i = (y-btn_pos_y)/btn_size_y;
-                        let in_ports = midi_in.ports();
-                        if let Some(in_port) = in_ports.get(i as usize){
-                            _conn_in = midi_in.connect(in_port, "read-input", callback, game.clone()).unwrap();
+                Event::KeyDown {  scancode, .. } => {
+                    if let Some(sc) = scancode {
+                        let index = match sc {
+                            Scancode::Num0 | Scancode::Kp0 => Some(0),
+                            Scancode::Num1 | Scancode::Kp1 => Some(1),
+                            Scancode::Num2 | Scancode::Kp2 => Some(2),
+                            Scancode::Num3 | Scancode::Kp3 => Some(3),
+                            Scancode::Num4 | Scancode::Kp4 => Some(4),
+                            Scancode::Num5 | Scancode::Kp5 => Some(5),
+                            Scancode::Num6 | Scancode::Kp6 => Some(6),
+                            Scancode::Num7 | Scancode::Kp7 => Some(7),
+                            Scancode::Num8 | Scancode::Kp8 => Some(8),
+                            Scancode::Num9 | Scancode::Kp9 => Some(9),
+                            _ => None
+                        };
+                        
+                        if let Some(i) = index {
+                            let in_ports = midi_in.as_ref().unwrap().ports();
+                            if let Some(in_port) = in_ports.get(i as usize){
+                                _conn_in = midi_in.take().unwrap().connect(in_port, "read-input", callback, game.clone()).unwrap();
+                            }
                         }
+                    }
+                }
 
-                        asking_midi_port = false;
+                Event::MouseButtonDown {  y, .. } => {
+                    if midi_in.is_some() {
+                        // println!("mouse btn down at ({},{})", x, y);
+                        let i = (y-btn_pos_y)/btn_size_y;
+                        
+                        let in_ports = midi_in.as_ref().unwrap().ports();
+                        if let Some(in_port) = in_ports.get(i as usize){
+                            _conn_in = midi_in.take().unwrap().connect(in_port, "read-input", callback, game.clone()).unwrap();
+                        }
                     }
                 }
 
@@ -97,17 +116,16 @@ fn main() -> Result<(), String> {
         canvas.set_draw_color(Color::RGB(255, 255, 255));
         canvas.clear();
 
-        if asking_midi_port {
-            let mut midi_in = MidiInput::new("midir reading input").unwrap();
-            midi_in.ignore(Ignore::None);
+        if midi_in.is_some() {
+            canvas.string(20, 20, "Select midi port (click on text or press key) :", Color::RGB(0, 0, 0)).unwrap();
 
-            let in_ports = midi_in.ports();
+            let in_ports = midi_in.as_ref().unwrap().ports();
             if in_ports.len() == 0 {
-                canvas.string(20, 400, "No midi port", Color::RGB(0, 0, 0)).unwrap();
+                canvas.string(20, btn_pos_y as i16, "No midi port", Color::RGB(0, 0, 0)).unwrap();
             }
             else{
                 for (i, p) in in_ports.iter().enumerate() {
-                    let s = format!("{}: {}", i, midi_in.port_name(p).unwrap());
+                    let s = format!("{}: {}", i, midi_in.as_ref().unwrap().port_name(p).unwrap());
                     canvas.string(20, (btn_pos_y+i as i32*btn_size_y) as i16, &s, Color::RGB(0, 0, 0)).unwrap();
                 }
             }
